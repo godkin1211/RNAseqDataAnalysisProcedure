@@ -98,3 +98,48 @@ do
 	samtools view -bS Aligned/${f}Aligned.out.sam -o Aligned/${f}.bam
 done
 ```
+
+# Locating alignment files
+
+### Using Rsamtools to bridge BAM files and R
+
+```{r, eval=FALSE}
+library(Rsamtools)
+bamfilenames <- list.files("~/Datasets/NGS_raw_data/Aligned", pattern = "bam")
+bamfiles <- BamFileList(bamfilenames)
+
+```
+
+### Defining gene models
+```{r, eval=FALSE}
+library("GenomicFeatures")
+gtffile <- file.path("~/Datasets/NGS_raw_data/RefGenome/Ensembl","Mus_musculus.GRCm38.82.gtf")
+txdb <- makeTxDbFromGFF(gtffile, format="gtf", circ_seqs=character())
+# Defining a gene by exon
+ebg <- exonsBy(txdb, by="gene")
+```
+
+### Reads counting
+```{r, eval=FALSE}
+library("GenomicAlignments")
+library("BiocParallel")
+# Specifying the parameters of parallel package
+snowparam <- SnowParam(workers = 12, type = "SOCK")
+register(snowparam)
+se <- summarizeOverlaps(feature=ebg, reads=bamfiles, mode="Union", ignore.strand=FALSE)
+```
+
+### Constructing a experimental design table & performing differential expression analysis
+```{r, eval=FALSE}
+library(DESeq2)
+sampleData <- data.frame(Treatment=rep("LPS_trt", 24), 
+                         Time=paste(rep(c(0,1,3,5,7,9), each=4), "h", sep=""), 
+                         Replicate=paste("r",rep(c(1:4),6),sep=""))
+rownames(sampleData) <- rownames(colData(se))
+colData(se) <- DataFrame(sampleData)
+dds <- DESeqDataSet(se, ~ Time)
+dds <- dds[rowSums(counts(dds)) > 1, ]
+dds.deseq <- DESeq(dds, test="LRT", reduced= ~1)
+results.deseq <- results(dds.deseq)
+results.sig.deseq <- subset(results.deseq, padj < 0.05)
+```
